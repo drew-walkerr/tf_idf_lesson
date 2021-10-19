@@ -1,0 +1,81 @@
+---
+title: "tf_idf bshes interests"
+author: "Drew Walker"
+date: "10/19/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#remotes::install_github("slu-openGIS/postmastr")
+library(operators)
+library(magrittr)
+library(stm)
+library(here)
+library(textmineR)
+library(tidyverse)
+library(tidytext)
+library(knitr) #Create nicely formatted output tables
+library(kableExtra) #Create nicely formatted output tables
+library(formattable) #For the color_tile function
+library(lubridate)
+library(tm)
+library(gt)
+library(webshot)
+library(epitweetr)
+```
+
+Read in Data
+
+```{r interest_load}
+bshes_interests_raw <- read_csv("bshes_student_and_faculty_interests.csv")
+
+bshes_interest_id <- bshes_interests_raw 
+```
+
+
+
+```{r, preprocessing-data}
+# remove  punctuation
+
+bshes_interests_raw$bio <- gsub('[[:punct:]]+', '', bshes_interests_raw$bio)
+text_cleaning_tokens <- bshes_interests_raw %>% 
+  tidytext::unnest_tokens(word, bio) %>% 
+  left_join(bshes_interest_id, by = "name") %>%
+  mutate(raw_text = bio)
+#remove words? like 
+text_cleaning_tokens$word <- gsub('[[:digit:]]+', '', text_cleaning_tokens$word)
+#remove anything where word is only 1 character like a i d, remove stopwords
+text_cleaning_tokens <- text_cleaning_tokens %>% filter(!(nchar(word) == 1))%>% 
+  anti_join(stop_words)
+#Stem/lemmatizer?
+# https://blogs.cornell.edu/cornellnlp/2019/02/09/choose-your-words-wisely-for-topic-models/ 
+# may not need to, is often done to save resources, or combine multiple words to mean same thing. May try to do as a sensitivity check 
+#remove commonly occurring words
+#remove spaces
+total_words <- text_cleaning_tokens %>% 
+  count(name,word, sort = TRUE) %>% 
+  filter(word != "")
+total_words_per_name <- total_words %>% 
+  group_by(name) %>% 
+  summarize(total = sum(n))
+word_counts_person_total_merge <- left_join(total_words_per_name, total_words)
+names_tf_idf <- word_counts_person_total_merge %>% 
+  bind_tf_idf(word,name,n)
+names_tf_idf %>%
+  select(-total) %>%
+  arrange(desc(tf_idf))
+library(forcats)
+names_tf_idf %>%
+  group_by(name) %>%
+  slice_max(tf_idf, n = 8, with_ties = FALSE) %>%
+  ungroup() %>%
+  ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = name)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~name, ncol = 3,nrow=3, scales = "free") +
+  labs(x = "tf-idf", y = NULL)
+current_time <- Sys.time()
+st <- format(current_time,"%Y-%m-%d_%H_%M")
+names_tf_idf_filename <- paste0(here("names_tf_idf"),st,".png") 
+ggsave(names_tf_idf_filename)
+```
